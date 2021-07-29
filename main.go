@@ -10,15 +10,11 @@ import (
 )
 
 type (
-	Scientist struct {
-		Surname   string `json:"surname,omitempty"`
-		FirstName string `json:"firstname,omitempty"`
+	Organization struct {
+		Handle   string `json:"handle,omitempty"`
 	}
 )
 
-type PriorityPrinter struct {
-	SubName string
-}
 
 func main() {
 
@@ -31,17 +27,31 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	ns, err := servicebus.NewNamespace(servicebus.NamespaceWithConnectionString(connString))
+	ns, _ := servicebus.NewNamespace(servicebus.NamespaceWithConnectionString(connString))
 
-	topic, err := getTopic(ctx, ns, topicName, subscriptionName)
-	if err != nil {
+	topic, terr := getTopic(ctx, ns, topicName, subscriptionName)
+	if terr != nil {
 		fmt.Printf("failed to build a new topic named %q\n", topicName)
-		os.Exit(1)
+		for i := 1; i <= 10; i++ {
+			fmt.Printf("Attempting retrying %v\n", i)
+			topic, terr = getTopic(ctx, ns, topicName, subscriptionName)
+			if terr == nil {
+				break
+			}
+
+			if i == 10 {
+				fmt.Println("Maximum retry attempts reached. Application will stop the execution. Goodnight!")
+				return
+			}
+
+			// wait 5 seconds before the next attempt
+			time.Sleep(5 * time.Second)
+		}
 	}
 
-	go sendMessages(ctx, topic)
+	 go sendMessages(ctx, topic)
 
-	receiveMessages(topic, subscriptionName)
+	 receiveMessages(topic, subscriptionName)
 
 }
 
@@ -62,12 +72,8 @@ func receiveMessages(topic *servicebus.Topic, subscriptionName string)  {
 	}
 
 	listenerHandle := subReceiver.Listen(ctx, servicebus.HandlerFunc(func(ctx context.Context, message *servicebus.Message) error {
+		//time.Sleep(30 * time.Second)
 		fmt.Println(string(message.Data) + ": received")
-		return message.Complete(ctx)
-	}))
-
-	listenerHandle2 := subReceiver.Listen(ctx, servicebus.HandlerFunc(func(ctx context.Context, message *servicebus.Message) error {
-		fmt.Println(string(message.Data) + ": received2")
 		return message.Complete(ctx)
 	}))
 
@@ -77,52 +83,39 @@ func receiveMessages(topic *servicebus.Topic, subscriptionName string)  {
 		fmt.Println("subReceiver.Closer", err)
 	}
 
-	<-listenerHandle2.Done()
-	if err := subReceiver.Close(ctx); err != nil {
-		fmt.Println("subReceiver.Closer", err)
-	}
+	fmt.Println("Retrying to establish connection")
+	receiveMessages(topic, subscriptionName)
 }
 
 
 func sendMessages(ctx context.Context, t *servicebus.Topic) {
 
-	scientists := []Scientist{
+	organizations := []Organization{
 		{
-			Surname:   "Einstein",
-			FirstName: "Albert",
+			Handle:   "a",
 		},
 		{
-			Surname:   "Heisenberg",
-			FirstName: "Werner",
+			Handle:   "s",
 		},
 		{
-			Surname:   "Sachith",
-			FirstName: "K",
+			Handle:   "d",
 		},
 		{
-			Surname:   "Adam",
-			FirstName: "Mann",
+			Handle:   "f",
 		},
 		{
-			Surname:   "Hell",
-			FirstName: "Bell",
+			Handle:   "g",
 		},
 		{
-			Surname:   "Dude",
-			FirstName: "There",
+			Handle:   "h",
 		},
 		{
-			Surname:   "Gone",
-			FirstName: "Mad",
-		},
-		{
-			Surname:   "Dam",
-			FirstName: "Stuff",
+			Handle:   "j",
 		},
 	}
 
-	for _, scientist := range scientists {
-		bits, err := json.Marshal(scientist)
+	for _, organization := range organizations {
+		bits, err := json.Marshal(organization)
 		if err != nil {
 			fmt.Println(err)
 			fmt.Errorf("marshal")
@@ -148,26 +141,26 @@ func getTopic(ctx context.Context, ns *servicebus.Namespace, topicName string, s
 
 	if err != nil {
 		fmt.Println("!!!! Error occurred in getTopic")
-		fmt.Println(err)
+		fmt.Printf("----> %v\n", err)
+		return nil, err
 	}
 
 	fmt.Println("executing subManagerStruct.Get")
 	subscriptionEntity, err := subManagerStruct.Get(ctx, subscriptionName)
 	if err != nil {
-		fmt.Println(err)
+		fmt.Printf("++++ %v\n", err)
+		return nil, err
 	}
 
-	fmt.Println("Done executing subManagerStruct.Get")
-
 	if subscriptionEntity == nil {
-		fmt.Println("!Subscription does not exist. Trying to create")
+		fmt.Println("Subscription does not exist. Trying to create")
 		_, err = subManagerStruct.Put(ctx, subscriptionName)
 		if err != nil {
-			fmt.Println(err)
+			fmt.Printf(".................. %v\n", err)
+			return nil, err
 		} else {
 			fmt.Println("Subscription created")
 		}
-
 	}
 
 	return subManagerStruct.Topic, err
